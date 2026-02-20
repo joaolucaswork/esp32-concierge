@@ -73,6 +73,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/tnm/zclaw/main/scripts/boots
 ```
 
 This bootstrap script clones/updates zclaw and then runs `./install.sh`. Works on macOS and Linux.
+
 It also points you to flash helpers that auto-detect serial port/chip and can switch `idf.py` target on mismatch.
 It remembers your choices in `~/.config/zclaw/install.env` (disable with `--no-remember`).
 
@@ -101,73 +102,6 @@ Advanced board/app config is separate from install flow:
 source ~/esp/esp-idf/export.sh
 idf.py menuconfig
 ```
-
-### Manual Setup
-
-<details>
-<summary>Click to expand manual installation steps</summary>
-
-```bash
-# Install ESP-IDF v5.4
-mkdir -p ~/esp && cd ~/esp
-git clone -b v5.4 --recursive https://github.com/espressif/esp-idf.git
-cd esp-idf && ./install.sh esp32c3,esp32s3
-```
-
-</details>
-
-### Build & Flash
-
-```bash
-# Source ESP-IDF environment (needed in each new terminal)
-source ~/esp/esp-idf/export.sh
-
-# Build
-idf.py build
-
-# Flash to device (replace PORT with your serial port)
-idf.py -p /dev/cu.usbmodem* flash monitor
-```
-
-If `source ~/esp/esp-idf/export.sh` fails, repair ESP-IDF tools:
-
-```bash
-cd ~/esp/esp-idf
-./install.sh esp32c3,esp32s3
-```
-
-Or use the convenience scripts:
-
-```bash
-./scripts/build.sh          # Build firmware
-./scripts/flash.sh          # Flash to device
-./scripts/flash-secure.sh   # Flash with encryption (dev mode, key readable)
-./scripts/flash-secure.sh --production  # Flash with key read-protected
-./scripts/provision.sh      # Provision WiFi/API credentials into NVS
-./scripts/monitor.sh        # Serial monitor
-./scripts/release-port.sh   # Release busy serial port holders
-./scripts/emulate.sh        # Run in QEMU emulator
-./scripts/exit-emulator.sh  # Stop QEMU emulator
-./scripts/web-relay.sh      # Optional hosted web relay + mobile chat UI (safe launcher)
-```
-
-`flash.sh` and `flash-secure.sh` auto-detect connected chip type and prompt to run
-`idf.py set-target <chip>` when project target does not match the board.
-
-### First Boot
-
-1. Flash firmware (`./scripts/flash.sh` or `./scripts/flash-secure.sh`)
-2. Run provisioning (`./scripts/provision.sh --port <serial-port>`)
-3. Enter required values:
-   - WiFi SSID
-   - LLM provider
-   - LLM API key
-4. Optional: WiFi password, Telegram bot token, Telegram chat ID
-5. Reboot board and watch logs with `./scripts/monitor.sh`
-
-`provision.sh` auto-detects your host WiFi SSID when possible.
-For Anthropic, it also sends a quick `hello` API check after key entry.
-Use `--skip-api-check` to bypass verification.
 
 ### Telegram Setup
 
@@ -204,30 +138,6 @@ No board yet? Run with a built-in mock responder:
 ```
 
 This relay approach does not add web UI code to ESP32 firmware binary.
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────┐
-│                    main.c                           │
-│  Boot → WiFi STA → NTP → Start Tasks                │
-└─────────────────────────────────────────────────────┘
-         │              │              │
-         ▼              ▼              ▼
-┌─────────────┐  ┌─────────────┐  ┌─────────────┐
-│  telegram.c │  │   agent.c   │  │   cron.c    │
-│  Poll msgs  │→ │   LLM loop  │ ←│  Scheduler  │
-│  Send reply │← │ Tool calls  │  │  NTP sync   │
-└─────────────┘  └─────────────┘  └─────────────┘
-                       │
-         ┌─────────────┼─────────────┐
-         ▼             ▼             ▼
-┌─────────────┐  ┌─────────────┐  ┌─────────────┐
-│   tools.c   │  │  memory.c   │  │   llm.c     │
-│  GPIO, mem  │  │  NVS store  │  │  HTTPS API  │
-│  cron, time │  │             │  │             │
-└─────────────┘  └─────────────┘  └─────────────┘
-```
 
 ## Tools
 
@@ -303,6 +213,99 @@ User tools are stored persistently and survive reboots. Up to 8 custom tools can
    - The C code runs on the ESP32, controlling actual hardware
 
 User tools are compositions of built-in primitives (`gpio_write`, `delay`, `memory_set`, `cron_set`, etc.) — no new code is generated, just natural language that the configured model decomposes into tool calls.
+
+## Manual Setup
+
+<details>
+<summary>Click to expand manual installation steps</summary>
+
+```bash
+# Install ESP-IDF v5.4
+mkdir -p ~/esp && cd ~/esp
+git clone -b v5.4 --recursive https://github.com/espressif/esp-idf.git
+cd esp-idf && ./install.sh esp32c3,esp32s3
+```
+
+</details>
+
+### Build & Flash
+
+```bash
+# Source ESP-IDF environment (needed in each new terminal)
+source ~/esp/esp-idf/export.sh
+
+# Build
+idf.py build
+
+# Flash to device (replace PORT with your serial port)
+idf.py -p /dev/cu.usbmodem* flash monitor
+```
+
+If `source ~/esp/esp-idf/export.sh` fails, repair ESP-IDF tools:
+
+```bash
+cd ~/esp/esp-idf
+./install.sh esp32c3,esp32s3
+```
+
+Or use the convenience scripts:
+
+```bash
+./scripts/build.sh          # Build firmware
+./scripts/flash.sh          # Flash to device
+./scripts/flash-secure.sh   # Flash with encryption (dev mode, key readable)
+./scripts/flash-secure.sh --production  # Flash with key read-protected
+./scripts/provision.sh      # Provision WiFi/API credentials into NVS
+./scripts/monitor.sh        # Serial monitor
+./scripts/release-port.sh   # Release busy serial port holders
+./scripts/emulate.sh        # Run in QEMU emulator
+./scripts/exit-emulator.sh  # Stop QEMU emulator
+./scripts/web-relay.sh      # Optional hosted web relay + mobile chat UI (safe launcher)
+```
+
+`flash.sh` and `flash-secure.sh` auto-detect connected chip type and prompt to run
+`idf.py set-target <chip>` when project target does not match the board.
+
+### First Boot
+
+1. Flash firmware (`./scripts/flash.sh` or `./scripts/flash-secure.sh`)
+2. Run provisioning (`./scripts/provision.sh --port <serial-port>`)
+3. Enter required values:
+   - WiFi SSID
+   - LLM provider
+   - LLM API key
+4. Optional: WiFi password, Telegram bot token, Telegram chat ID
+5. Reboot board and watch logs with `./scripts/monitor.sh`
+
+`provision.sh` auto-detects your host WiFi SSID when possible.
+For Anthropic, it also sends a quick `hello` API check after key entry.
+Use `--skip-api-check` to bypass verification.
+
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────┐
+│                    main.c                           │
+│  Boot → WiFi STA → NTP → Start Tasks                │
+└─────────────────────────────────────────────────────┘
+         │              │              │
+         ▼              ▼              ▼
+┌─────────────┐  ┌─────────────┐  ┌─────────────┐
+│  telegram.c │  │   agent.c   │  │   cron.c    │
+│  Poll msgs  │→ │   LLM loop  │ ←│  Scheduler  │
+│  Send reply │← │ Tool calls  │  │  NTP sync   │
+└─────────────┘  └─────────────┘  └─────────────┘
+                       │
+         ┌─────────────┼─────────────┐
+         ▼             ▼             ▼
+┌─────────────┐  ┌─────────────┐  ┌─────────────┐
+│   tools.c   │  │  memory.c   │  │   llm.c     │
+│  GPIO, mem  │  │  NVS store  │  │  HTTPS API  │
+│  cron, time │  │             │  │             │
+└─────────────┘  └─────────────┘  └─────────────┘
+```
+
 
 ## Configuration
 
