@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <inttypes.h>
+#include <ctype.h>
 
 static const char *TAG = "telegram";
 
@@ -24,6 +25,7 @@ static QueueHandle_t s_output_queue;
 static char s_bot_token[64] = {0};
 static int64_t s_chat_id = 0;
 static int64_t s_last_update_id = 0;
+static telegram_msg_t s_send_msg;
 
 // Exponential backoff state
 static int s_consecutive_failures = 0;
@@ -36,6 +38,40 @@ typedef struct {
     size_t len;
     bool truncated;
 } telegram_http_ctx_t;
+
+static bool parse_chat_id_string(const char *input, int64_t *chat_id_out)
+{
+    const unsigned char *cursor = (const unsigned char *)input;
+    char *endptr = NULL;
+    long long parsed;
+
+    if (!input || !chat_id_out) {
+        return false;
+    }
+
+    while (*cursor != '\0' && isspace(*cursor)) {
+        cursor++;
+    }
+    if (*cursor == '\0') {
+        return false;
+    }
+
+    parsed = strtoll((const char *)cursor, &endptr, 10);
+    if (!endptr || endptr == (const char *)cursor) {
+        return false;
+    }
+
+    while (*endptr != '\0' && isspace((unsigned char)*endptr)) {
+        endptr++;
+    }
+
+    if (*endptr != '\0' || parsed == 0) {
+        return false;
+    }
+
+    *chat_id_out = (int64_t)parsed;
+    return true;
+}
 
 static esp_err_t http_event_handler(esp_http_client_event_t *evt)
 {
@@ -69,8 +105,14 @@ esp_err_t telegram_init(void)
     // Load last known chat ID (optional)
     char chat_id_str[24];
     if (memory_get(NVS_KEY_TG_CHAT_ID, chat_id_str, sizeof(chat_id_str))) {
-        s_chat_id = strtoll(chat_id_str, NULL, 10);
-        ESP_LOGI(TAG, "Loaded chat ID: %" PRId64, s_chat_id);
+        int64_t parsed_chat_id = 0;
+        if (parse_chat_id_string(chat_id_str, &parsed_chat_id)) {
+            s_chat_id = parsed_chat_id;
+            ESP_LOGI(TAG, "Loaded chat ID: %" PRId64, s_chat_id);
+        } else {
+            s_chat_id = 0;
+            ESP_LOGW(TAG, "Invalid Telegram chat ID in NVS: '%s'", chat_id_str);
+        }
     }
 
     ESP_LOGI(TAG, "Telegram initialized");
@@ -95,6 +137,10 @@ static void build_url(char *buf, size_t buf_size, const char *method)
 
 esp_err_t telegram_send(const char *text)
 {
+    telegram_http_ctx_t *ctx = NULL;
+    esp_http_client_handle_t client = NULL;
+    esp_err_t err;
+
     if (!telegram_is_configured() || s_chat_id == 0) {
         ESP_LOGW(TAG, "Cannot send - not configured or no chat ID");
         return ESP_ERR_INVALID_STATE;
@@ -120,21 +166,25 @@ esp_err_t telegram_send(const char *text)
         return ESP_ERR_NO_MEM;
     }
 
+    ctx = calloc(1, sizeof(*ctx));
+    if (!ctx) {
+        free(body);
+        return ESP_ERR_NO_MEM;
+    }
+
     esp_http_client_config_t config = {
         .url = url,
         .event_handler = http_event_handler,
-        .user_data = NULL,
+        .user_data = ctx,
         .timeout_ms = HTTP_TIMEOUT_MS,
         .crt_bundle_attach = esp_crt_bundle_attach,
     };
 
-    telegram_http_ctx_t ctx = {0};
-    config.user_data = &ctx;
-
-    esp_http_client_handle_t client = esp_http_client_init(&config);
+    client = esp_http_client_init(&config);
     if (!client) {
         ESP_LOGE(TAG, "Failed to init HTTP client");
         free(body);
+        free(ctx);
         return ESP_FAIL;
     }
 
@@ -142,14 +192,14 @@ esp_err_t telegram_send(const char *text)
     esp_http_client_set_header(client, "Content-Type", "application/json");
     esp_http_client_set_post_field(client, body, strlen(body));
 
-    esp_err_t err = esp_http_client_perform(client);
+    err = esp_http_client_perform(client);
 
     if (err == ESP_OK) {
         int status = esp_http_client_get_status_code(client);
         if (status != 200) {
             ESP_LOGE(TAG, "sendMessage failed: %d", status);
-            if (ctx.buf[0] != '\0') {
-                ESP_LOGE(TAG, "sendMessage response: %s", ctx.buf);
+            if (ctx->buf[0] != '\0') {
+                ESP_LOGE(TAG, "sendMessage response: %s", ctx->buf);
             }
             err = ESP_FAIL;
         }
@@ -157,6 +207,7 @@ esp_err_t telegram_send(const char *text)
 
     esp_http_client_cleanup(client);
     free(body);
+    free(ctx);
     return err;
 }
 
@@ -169,52 +220,65 @@ esp_err_t telegram_send_startup(void)
 static esp_err_t telegram_poll(void)
 {
     char url[384];
+    telegram_http_ctx_t *ctx = NULL;
+    esp_http_client_handle_t client = NULL;
+    esp_err_t err;
+    int status;
+
     snprintf(url, sizeof(url), "%s%s/getUpdates?timeout=%d&limit=1&offset=%" PRId64,
              TELEGRAM_API_URL, s_bot_token, TELEGRAM_POLL_TIMEOUT, s_last_update_id + 1);
+
+    ctx = calloc(1, sizeof(*ctx));
+    if (!ctx) {
+        return ESP_ERR_NO_MEM;
+    }
 
     esp_http_client_config_t config = {
         .url = url,
         .event_handler = http_event_handler,
-        .user_data = NULL,
+        .user_data = ctx,
         .timeout_ms = (TELEGRAM_POLL_TIMEOUT + 10) * 1000,  // Add buffer to timeout
         .crt_bundle_attach = esp_crt_bundle_attach,
     };
 
-    telegram_http_ctx_t ctx = {0};
-    config.user_data = &ctx;
-
-    esp_http_client_handle_t client = esp_http_client_init(&config);
+    client = esp_http_client_init(&config);
     if (!client) {
         ESP_LOGE(TAG, "Failed to init HTTP client for poll");
+        free(ctx);
         return ESP_FAIL;
     }
 
-    esp_err_t err = esp_http_client_perform(client);
-    int status = esp_http_client_get_status_code(client);
+    err = esp_http_client_perform(client);
+    status = esp_http_client_get_status_code(client);
     esp_http_client_cleanup(client);
+    client = NULL;
 
     if (err != ESP_OK || status != 200) {
         ESP_LOGE(TAG, "getUpdates failed: err=%d status=%d", err, status);
+        free(ctx);
         return ESP_FAIL;
     }
 
-    if (ctx.truncated) {
+    if (ctx->truncated) {
         int64_t recovered_update_id = 0;
-        if (telegram_extract_max_update_id(ctx.buf, &recovered_update_id)) {
+        if (telegram_extract_max_update_id(ctx->buf, &recovered_update_id)) {
             s_last_update_id = recovered_update_id;
             ESP_LOGW(TAG, "Recovered from truncated response, skipping to update_id=%" PRId64,
                      s_last_update_id);
+            free(ctx);
             return ESP_OK;
         }
 
         ESP_LOGE(TAG, "Truncated response without parseable update_id");
+        free(ctx);
         return ESP_FAIL;
     }
 
     // Parse response
-    cJSON *root = cJSON_Parse(ctx.buf);
+    cJSON *root = cJSON_Parse(ctx->buf);
     if (!root) {
         ESP_LOGE(TAG, "Failed to parse response");
+        free(ctx);
         return ESP_FAIL;
     }
 
@@ -222,12 +286,14 @@ static esp_err_t telegram_poll(void)
     if (!ok || !cJSON_IsTrue(ok)) {
         ESP_LOGE(TAG, "API returned not ok");
         cJSON_Delete(root);
+        free(ctx);
         return ESP_FAIL;
     }
 
     cJSON *result = cJSON_GetObjectItem(root, "result");
     if (!result || !cJSON_IsArray(result)) {
         cJSON_Delete(root);
+        free(ctx);
         return ESP_OK;  // No updates, that's fine
     }
 
@@ -285,18 +351,18 @@ static esp_err_t telegram_poll(void)
     }
 
     cJSON_Delete(root);
+    free(ctx);
     return ESP_OK;
 }
 
 // Telegram response task - watches output queue, sends to Telegram
 static void telegram_send_task(void *arg)
 {
-    telegram_msg_t msg;
-
+    (void)arg;
     while (1) {
-        if (xQueueReceive(s_output_queue, &msg, portMAX_DELAY) == pdTRUE) {
+        if (xQueueReceive(s_output_queue, &s_send_msg, portMAX_DELAY) == pdTRUE) {
             if (telegram_is_configured() && s_chat_id != 0) {
-                telegram_send(msg.text);
+                telegram_send(s_send_msg.text);
             }
         }
     }

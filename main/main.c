@@ -335,6 +335,10 @@ static bool wifi_connect_sta(void)
              ssid, (unsigned)strlen(pass));
 
     s_wifi_event_group = xEventGroupCreate();
+    if (!s_wifi_event_group) {
+        ESP_LOGE(TAG, "Failed to create WiFi event group");
+        return false;
+    }
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
