@@ -322,5 +322,29 @@ if [ "$MOCK_AGENT" != true ]; then
     RELAY_ARGS+=(--serial-port "$PORT")
 fi
 
-exec uv run --with-requirements scripts/requirements-web-relay.txt \
-    scripts/web_relay.py "${RELAY_ARGS[@]}"
+if command -v uv >/dev/null 2>&1; then
+    exec uv run --with-requirements scripts/requirements-web-relay.txt \
+        scripts/web_relay.py "${RELAY_ARGS[@]}"
+fi
+
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "Error: neither 'uv' nor 'python3' is available."
+    echo "Install uv (recommended), or install Python 3 and retry."
+    exit 1
+fi
+
+echo "uv not found; falling back to python3 runtime."
+if ! python3 -c "import serial" >/dev/null 2>&1; then
+    if ! python3 -m pip --version >/dev/null 2>&1; then
+        echo "Error: python3 is available but pip is missing."
+        echo "Install uv (recommended), or install pip for Python 3 and retry."
+        exit 1
+    fi
+    echo "Installing relay dependencies with pip (user site)..."
+    if ! python3 -m pip install --user -r scripts/requirements-web-relay.txt; then
+        echo "Error: failed to install relay dependencies via pip."
+        exit 1
+    fi
+fi
+
+exec python3 scripts/web_relay.py "${RELAY_ARGS[@]}"

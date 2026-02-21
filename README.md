@@ -121,9 +121,14 @@ messages to the board over serial.
    ```bash
    export ZCLAW_WEB_API_KEY='choose-a-long-random-secret'
    ```
-2. Run against a connected device:
+2. Run against a connected device.
+   Local repo checkout:
    ```bash
    ./scripts/web-relay.sh --serial-port /dev/cu.usbmodem1101 --host 0.0.0.0 --port 8787
+   ```
+   No-clone bootstrap:
+   ```bash
+   bash <(curl -fsSL https://raw.githubusercontent.com/tnm/zclaw/main/scripts/bootstrap-web-relay.sh) -- --serial-port /dev/cu.usbmodem1101 --host 0.0.0.0 --port 8787
    ```
 3. Open `http://<host>:8787` from phone or desktop.
 
@@ -131,6 +136,7 @@ Note: only one process should hold the serial port at a time. If you also run
 `idf.py monitor` (or any serial console) against the same `/dev/cu.*` device,
 relay chat calls can fail with a serial read error.
 If needed, use `--kill-monitor` to stop ESP-IDF monitor holders before launch.
+The no-clone bootstrap stores relay files in `~/.local/share/zclaw/web-relay` by default.
 
 No board yet? Run with a built-in mock responder:
 
@@ -270,6 +276,7 @@ Or use the convenience scripts:
 ./scripts/emulate.sh        # Run in QEMU emulator
 ./scripts/exit-emulator.sh  # Stop QEMU emulator
 ./scripts/web-relay.sh      # Optional hosted web relay + mobile chat UI (safe launcher)
+./scripts/bootstrap-web-relay.sh  # Download/run relay files without full repo clone
 ```
 
 `flash.sh` and `flash-secure.sh` auto-detect connected chip type and prompt to run
