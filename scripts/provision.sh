@@ -15,6 +15,7 @@ TG_TOKEN=""
 TG_CHAT_ID=""
 ASSUME_YES=false
 VERIFY_API_KEY=true
+PRINT_DETECTED_SSID=false
 
 usage() {
     cat << EOF
@@ -31,6 +32,7 @@ Options:
   --tg-chat-id <id>         Telegram chat ID (optional)
   --yes                     Non-interactive (requires --api-key; SSID auto-detect if possible)
   --skip-api-check          Skip live API key verification step
+  --print-detected-ssid     Print detected host WiFi SSID and exit (test/troubleshooting helper)
   -h, --help                Show help
 EOF
 }
@@ -487,6 +489,9 @@ while [ $# -gt 0 ]; do
         --skip-api-check)
             VERIFY_API_KEY=false
             ;;
+        --print-detected-ssid)
+            PRINT_DETECTED_SSID=true
+            ;;
         -h|--help)
             usage
             exit 0
@@ -499,6 +504,14 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
+
+if [ "$PRINT_DETECTED_SSID" = true ]; then
+    DETECTED_SSID="$(detect_host_wifi_ssid || true)"
+    if [ -n "$DETECTED_SSID" ]; then
+        echo "$DETECTED_SSID"
+    fi
+    exit 0
+fi
 
 source_idf_env || exit 1
 

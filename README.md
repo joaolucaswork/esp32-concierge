@@ -428,6 +428,9 @@ If the console is stuck, run `./scripts/exit-emulator.sh` from another terminal.
 ./scripts/test.sh device  # Device-test build (requires sdkconfig.test)
 ```
 
+This repo includes `sdkconfig.test` by default for dedicated device-test builds
+with stubbed LLM/Telegram dependencies.
+
 ## Memory Usage
 
 | Resource | Used | Free |
