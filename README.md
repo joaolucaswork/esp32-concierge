@@ -15,13 +15,9 @@ zclaw is written in C and runs on ESP32 boards with a strict firmware budget tar
 
 ## Full Documentation
 
-Use the K&R-style docs site for complete guides and reference.
+Use the docs site for complete guides and reference.
 
-- Chapter 0: [The 888 KB Assistant](docs-site/index.html)
-- [Getting Started](docs-site/getting-started.html)
-- [Tool Reference](docs-site/tools.html)
-- [Architecture](docs-site/architecture.html)
-- [Security](docs-site/security.html)
+- Open docs: [docs-site/index.html](docs-site/index.html)
 - Docs site notes: [docs-site/README.md](docs-site/README.md)
 - Complete README (verbatim, full detail): [docs-site/reference/README_COMPLETE.md](docs-site/reference/README_COMPLETE.md)
 
@@ -58,7 +54,7 @@ Important setup notes:
 - For encrypted credentials in flash, use secure mode (`--flash-mode secure` in install flow, or `./scripts/flash-secure.sh` directly).
 - After flashing, provision WiFi + LLM credentials with `./scripts/provision.sh`.
 - If serial port is busy, run `./scripts/release-port.sh` and retry.
-- Full setup/provisioning details live in [docs-site/getting-started.html](docs-site/getting-started.html).
+- Full setup/provisioning details are in the docs site index.
 
 ## Highlights
 
