@@ -20,7 +20,7 @@ static const char *TAG = "llm";
 
 // Current backend configuration (loaded from NVS)
 static llm_backend_t s_backend = LLM_BACKEND_OPENAI;
-static char s_api_key[128] = {0};
+static char s_api_key[256] = {0};
 static char s_model[64] = {0};
 
 #if !CONFIG_ZCLAW_STUB_LLM && !CONFIG_ZCLAW_EMULATOR_LIVE_LLM
@@ -252,7 +252,7 @@ esp_err_t llm_request(const char *request_json, char *response_buf, size_t respo
         esp_http_client_set_header(client, "anthropic-version", "2023-06-01");
     } else {
         // OpenAI and OpenRouter use Bearer token
-        char auth_header[150];
+        char auth_header[270];
         snprintf(auth_header, sizeof(auth_header), "Bearer %s", s_api_key);
         esp_http_client_set_header(client, "Authorization", auth_header);
 

@@ -27,6 +27,26 @@ static int64_t s_chat_id = 0;
 static int64_t s_last_update_id = 0;
 static telegram_msg_t s_send_msg;
 
+// Nano newlib printf doesn't support %lld/PRId64. This helper converts int64 to string.
+static const char *i64_to_str(int64_t val, char *buf, size_t buf_size)
+{
+    if (buf_size == 0) return "";
+    bool negative = (val < 0);
+    uint64_t uval = negative ? (uint64_t)(-(val + 1)) + 1 : (uint64_t)val;
+    char *p = buf + buf_size - 1;
+    *p = '\0';
+    do {
+        if (p == buf) return "0";  // overflow guard
+        *(--p) = '0' + (uval % 10);
+        uval /= 10;
+    } while (uval > 0);
+    if (negative) {
+        if (p == buf) return "0";
+        *(--p) = '-';
+    }
+    return p;
+}
+
 // Exponential backoff state
 static int s_consecutive_failures = 0;
 #define BACKOFF_BASE_MS     5000    // 5 seconds
@@ -108,7 +128,8 @@ esp_err_t telegram_init(void)
         int64_t parsed_chat_id = 0;
         if (parse_chat_id_string(chat_id_str, &parsed_chat_id)) {
             s_chat_id = parsed_chat_id;
-            ESP_LOGI(TAG, "Loaded chat ID: %" PRId64, s_chat_id);
+            char id_buf[24];
+            ESP_LOGI(TAG, "Loaded chat ID: %s", i64_to_str(s_chat_id, id_buf, sizeof(id_buf)));
         } else {
             s_chat_id = 0;
             ESP_LOGW(TAG, "Invalid Telegram chat ID in NVS: '%s'", chat_id_str);
@@ -225,8 +246,10 @@ static esp_err_t telegram_poll(void)
     esp_err_t err;
     int status;
 
-    snprintf(url, sizeof(url), "%s%s/getUpdates?timeout=%d&limit=1&offset=%" PRId64,
-             TELEGRAM_API_URL, s_bot_token, TELEGRAM_POLL_TIMEOUT, s_last_update_id + 1);
+    char off_buf[24];
+    snprintf(url, sizeof(url), "%s%s/getUpdates?timeout=%d&limit=1&offset=%s",
+             TELEGRAM_API_URL, s_bot_token, TELEGRAM_POLL_TIMEOUT,
+             i64_to_str(s_last_update_id + 1, off_buf, sizeof(off_buf)));
 
     ctx = calloc(1, sizeof(*ctx));
     if (!ctx) {
@@ -263,8 +286,9 @@ static esp_err_t telegram_poll(void)
         int64_t recovered_update_id = 0;
         if (telegram_extract_max_update_id(ctx->buf, &recovered_update_id)) {
             s_last_update_id = recovered_update_id;
-            ESP_LOGW(TAG, "Recovered from truncated response, skipping to update_id=%" PRId64,
-                     s_last_update_id);
+            char rec_buf[24];
+            ESP_LOGW(TAG, "Recovered from truncated response, skipping to update_id=%s",
+                     i64_to_str(s_last_update_id, rec_buf, sizeof(rec_buf)));
             free(ctx);
             return ESP_OK;
         }
@@ -326,13 +350,17 @@ static esp_err_t telegram_poll(void)
 
                 // Authentication: reject messages from unknown chat IDs
                 if (s_chat_id != 0 && incoming_chat_id != s_chat_id) {
-                    ESP_LOGW(TAG, "Rejected message from unauthorized chat: %" PRId64, incoming_chat_id);
+                    char rej_buf[24];
+                    ESP_LOGW(TAG, "Rejected message from unauthorized chat: %s",
+                             i64_to_str(incoming_chat_id, rej_buf, sizeof(rej_buf)));
                     continue;
                 }
 
                 // If no chat ID configured, reject all (must be set during provisioning)
                 if (s_chat_id == 0) {
-                    ESP_LOGW(TAG, "No chat ID configured - ignoring message from %" PRId64, incoming_chat_id);
+                    char ign_buf[24];
+                    ESP_LOGW(TAG, "No chat ID configured - ignoring message from %s",
+                             i64_to_str(incoming_chat_id, ign_buf, sizeof(ign_buf)));
                     continue;
                 }
 
@@ -387,10 +415,95 @@ static int get_backoff_delay_ms(void)
     return delay;
 }
 
+// Helper: single getUpdates call, returns HTTP status or -1 on error
+static int telegram_get_updates_raw(const char *url, telegram_http_ctx_t *ctx)
+{
+    esp_http_client_config_t config = {
+        .url = url,
+        .event_handler = http_event_handler,
+        .user_data = ctx,
+        .timeout_ms = 10000,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+    };
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (!client) return -1;
+
+    esp_err_t err = esp_http_client_perform(client);
+    int status = (err == ESP_OK) ? esp_http_client_get_status_code(client) : -1;
+    esp_http_client_cleanup(client);
+    return status;
+}
+
+// Flush any pending updates so we don't reprocess old messages after reboot.
+// Step 1: getUpdates?offset=-1 to get the last pending update_id.
+// Step 2: getUpdates?offset=last_id+1 to confirm/acknowledge all updates.
+static void telegram_flush_pending(void)
+{
+    char url[384];
+
+    // Step 1: get the last pending update
+    snprintf(url, sizeof(url), "%s%s/getUpdates?offset=-1&limit=1&timeout=0",
+             TELEGRAM_API_URL, s_bot_token);
+
+    telegram_http_ctx_t *ctx = calloc(1, sizeof(*ctx));
+    if (!ctx) return;
+
+    int status = telegram_get_updates_raw(url, ctx);
+    if (status != 200) {
+        ESP_LOGW(TAG, "Flush step 1 failed (status=%d)", status);
+        free(ctx);
+        return;
+    }
+
+    // Parse the last update_id
+    int64_t last_id = 0;
+    cJSON *root = cJSON_Parse(ctx->buf);
+    if (root) {
+        cJSON *result = cJSON_GetObjectItem(root, "result");
+        if (result && cJSON_IsArray(result)) {
+            cJSON *update = cJSON_GetArrayItem(result, 0);
+            if (update) {
+                cJSON *uid = cJSON_GetObjectItem(update, "update_id");
+                if (uid && cJSON_IsNumber(uid)) {
+                    last_id = (int64_t)uid->valuedouble;
+                }
+            }
+        }
+        cJSON_Delete(root);
+    }
+    free(ctx);
+
+    if (last_id == 0) {
+        ESP_LOGI(TAG, "No pending updates to flush");
+        return;
+    }
+
+    // Step 2: confirm all updates by requesting offset = last_id + 1
+    char flush_buf[24];
+    snprintf(url, sizeof(url), "%s%s/getUpdates?offset=%s&limit=1&timeout=0",
+             TELEGRAM_API_URL, s_bot_token,
+             i64_to_str(last_id + 1, flush_buf, sizeof(flush_buf)));
+
+    ctx = calloc(1, sizeof(*ctx));
+    if (!ctx) return;
+
+    status = telegram_get_updates_raw(url, ctx);
+    free(ctx);
+
+    s_last_update_id = last_id;
+    char fid_buf[24];
+    ESP_LOGI(TAG, "Flushed all pending updates up to %s (confirm status=%d)",
+             i64_to_str(last_id, fid_buf, sizeof(fid_buf)), status);
+}
+
 // Telegram polling task - polls for new messages
 static void telegram_poll_task(void *arg)
 {
     ESP_LOGI(TAG, "Polling task started");
+
+    // Discard old messages from before this boot
+    telegram_flush_pending();
 
     while (1) {
         if (telegram_is_configured()) {
