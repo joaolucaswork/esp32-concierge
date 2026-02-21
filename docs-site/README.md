@@ -12,6 +12,7 @@ Custom static docs site with a print-book visual style inspired by classic C ref
 
 ## Structure
 
+- `README.html` - web-formatted README landing page
 - `index.html` - overview and chapter map
 - `getting-started.html` - setup, flash, provision flow
 - `tools.html` - tool reference and schedule grammar

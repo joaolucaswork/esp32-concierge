@@ -20,7 +20,8 @@ Fun to use, fun to hack on.
 Use the docs site for complete guides and reference.
 
 - [Full documentation](https://zclaw.dev)
-- [Classical README](https://zclaw.dev/README_COMPLETE.md)
+- [README (web)](https://zclaw.dev/README.html)
+- [Complete README (verbatim)](https://zclaw.dev/reference/README_COMPLETE.md)
 
 
 ## Quick Start
