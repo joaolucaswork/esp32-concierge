@@ -107,6 +107,16 @@ source ~/esp/esp-idf/export.sh
 idf.py menuconfig
 ```
 
+### Docs Site (K&R-style)
+
+A custom old-school docs experience now lives in `docs-site/`.
+
+```bash
+cd docs-site
+python3 -m http.server 8788
+# open http://127.0.0.1:8788
+```
+
 ### Telegram Setup
 
 1. Message [@BotFather](https://t.me/botfather) on Telegram
