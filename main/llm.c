@@ -60,11 +60,14 @@ esp_err_t llm_init(void)
     // Load backend type from NVS
     char backend_str[16] = {0};
     if (memory_get(NVS_KEY_LLM_BACKEND, backend_str, sizeof(backend_str))) {
-        if (strcmp(backend_str, "openai") == 0) {
+        if (strcmp(backend_str, "anthropic") == 0) {
+            s_backend = LLM_BACKEND_ANTHROPIC;
+        } else if (strcmp(backend_str, "openai") == 0) {
             s_backend = LLM_BACKEND_OPENAI;
         } else if (strcmp(backend_str, "openrouter") == 0) {
             s_backend = LLM_BACKEND_OPENROUTER;
         } else {
+            ESP_LOGW(TAG, "Unknown llm_backend '%s', defaulting to OpenAI", backend_str);
             s_backend = LLM_BACKEND_OPENAI;
         }
     }
