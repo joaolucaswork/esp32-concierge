@@ -37,7 +37,7 @@ Agent: Done. GPIO2 is now off.
 - **Persistent memory** — Remembers things across reboots
 - **Any LLM backend** — Anthropic, OpenAI, or open source models via OpenRouter
 - **$5 hardware** — Just an ESP32 dev board and WiFi
-- **~910 KB binary** — Fits in dual OTA partitions with ~40% free
+- **~888 KB guaranteed max binary** — Fits in dual OTA partitions with ~40% free
 
 ### Soon?
 
