@@ -1,12 +1,13 @@
 (function () {
   var THEME_STORAGE_KEY = 'zclaw_docs_theme';
+  var THEME_ORDER = ['kr', 'light', 'dark'];
   var page = document.querySelector('.page');
   var sidebar = document.querySelector('.sidebar');
   var topbar = document.querySelector('.topbar');
   var menuButton = document.querySelector('.menu-toggle');
   var links = Array.prototype.slice.call(document.querySelectorAll('.chapter-list a'));
   var current = window.location.pathname.split('/').pop() || 'index.html';
-  var themeButtons = [];
+  var themeSwitchers = [];
   var shortcutPanel = null;
   var gPrefixActive = false;
   var gPrefixTimer = null;
@@ -69,32 +70,61 @@
     }
   }
 
-  function currentTheme() {
-    return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  function normalizeTheme(theme) {
+    return THEME_ORDER.indexOf(theme) >= 0 ? theme : 'kr';
   }
 
-  function updateThemeButtons(theme) {
-    themeButtons.forEach(function (button) {
-      if (theme === 'dark') {
-        setButtonFace(button, '☀', 'Day');
-      } else {
-        setButtonFace(button, '☾', 'Night');
-      }
-      button.setAttribute('title', 'Toggle dark mode (D)');
-      button.setAttribute('aria-label', 'Toggle dark mode');
+  function currentTheme() {
+    return normalizeTheme(document.documentElement.getAttribute('data-theme'));
+  }
+
+  function nextTheme(theme) {
+    var normalized = normalizeTheme(theme);
+    var index = THEME_ORDER.indexOf(normalized);
+    return THEME_ORDER[(index + 1) % THEME_ORDER.length];
+  }
+
+  function themeLabel(theme) {
+    if (theme === 'kr') {
+      return 'K&R';
+    }
+    if (theme === 'light') {
+      return 'Day';
+    }
+    return 'Dusk';
+  }
+
+  function updateThemeSwitchers(theme) {
+    var normalized = normalizeTheme(theme);
+    themeSwitchers.forEach(function (switcher) {
+      var options = Array.prototype.slice.call(switcher.querySelectorAll('.theme-choice'));
+      options.forEach(function (option) {
+        var optionTheme = option.getAttribute('data-theme');
+        var active = optionTheme === normalized;
+        option.classList.toggle('is-active', active);
+        option.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
+
+      var next = nextTheme(normalized);
+      switcher.setAttribute('title', 'Theme style. D cycles to ' + themeLabel(next));
+      switcher.setAttribute('aria-label', 'Theme style selector');
     });
   }
 
   function applyTheme(theme) {
-    var normalized = theme === 'dark' ? 'dark' : 'light';
+    var normalized = normalizeTheme(theme);
     document.documentElement.setAttribute('data-theme', normalized);
-    updateThemeButtons(normalized);
+    updateThemeSwitchers(normalized);
+  }
+
+  function setTheme(theme) {
+    var normalized = normalizeTheme(theme);
+    applyTheme(normalized);
+    saveTheme(normalized);
   }
 
   function toggleTheme() {
-    var next = currentTheme() === 'dark' ? 'light' : 'dark';
-    applyTheme(next);
-    saveTheme(next);
+    setTheme(nextTheme(currentTheme()));
   }
 
   function chapterIndex() {
@@ -139,10 +169,40 @@
     return button;
   }
 
-  function setButtonFace(button, icon, label) {
-    button.innerHTML =
-      '<span class="btn-icon" aria-hidden="true">' + icon + '</span>' +
-      '<span class="btn-label">' + label + '</span>';
+  function utilityLink(label, className, href) {
+    var link = document.createElement('a');
+    link.className = className ? 'utility-btn utility-link ' + className : 'utility-btn utility-link';
+    link.href = href;
+    link.textContent = label;
+    return link;
+  }
+
+  function setButtonLabel(button, label) {
+    button.textContent = label;
+  }
+
+  function createThemeSwitcher(className) {
+    var switcher = document.createElement('div');
+    switcher.className = className ? 'theme-switcher ' + className : 'theme-switcher';
+    switcher.setAttribute('role', 'group');
+    switcher.setAttribute('aria-label', 'Theme styles');
+
+    THEME_ORDER.forEach(function (theme) {
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'theme-choice';
+      button.textContent = themeLabel(theme);
+      button.setAttribute('data-theme', theme);
+      button.setAttribute('aria-pressed', 'false');
+      button.setAttribute('title', 'Set theme: ' + themeLabel(theme));
+      button.addEventListener('click', function () {
+        setTheme(theme);
+      });
+      switcher.appendChild(button);
+    });
+
+    themeSwitchers.push(switcher);
+    return switcher;
   }
 
   function updateMenuButtonState() {
@@ -210,7 +270,7 @@
       '      <tr><th><kbd>h</kbd> / <kbd>l</kbd></th><td>Previous or next chapter</td></tr>' +
       '      <tr><th><kbd>j</kbd> / <kbd>k</kbd></th><td>Scroll down or up</td></tr>' +
       '      <tr><th><kbd>gg</kbd> / <kbd>G</kbd></th><td>Top or bottom of page</td></tr>' +
-      '      <tr><th><kbd>D</kbd></th><td>Toggle dark mode</td></tr>' +
+      '      <tr><th><kbd>D</kbd></th><td>Cycle K&amp;R, Day, and Dusk modes</td></tr>' +
       '      <tr><th><kbd>M</kbd></th><td>Toggle sidebar menu (mobile)</td></tr>' +
       '      <tr><th><kbd>?</kbd></th><td>Open/close this panel</td></tr>' +
       '      <tr><th><kbd>Esc</kbd></th><td>Close panel and mobile menu</td></tr>' +
@@ -255,12 +315,11 @@
   }
 
   function addUtilityButtons() {
-    var themeButtonTop = utilityButton('', 'theme-toggle', toggleTheme);
+    var themeSwitcherTop = createThemeSwitcher('theme-switcher-top');
     var keysButtonTop = utilityButton('', 'keys-toggle', toggleShortcutPanel);
-    setButtonFace(keysButtonTop, '⌨', 'Keys');
+    setButtonLabel(keysButtonTop, 'Keys');
     keysButtonTop.setAttribute('title', 'Show keyboard shortcuts (?)');
     keysButtonTop.setAttribute('aria-label', 'Show keyboard shortcuts');
-    themeButtons.push(themeButtonTop);
 
     if (topbar) {
       var topbarActions = topbar.querySelector('.topbar-actions');
@@ -274,29 +333,30 @@
         topbarActions.appendChild(menuButton);
       }
 
-      topbarActions.appendChild(themeButtonTop);
+      topbarActions.appendChild(themeSwitcherTop);
       topbarActions.appendChild(keysButtonTop);
     }
 
     if (sidebar) {
-      var themeButtonSide = utilityButton('', 'theme-toggle', toggleTheme);
+      var themeSwitcherSide = createThemeSwitcher('theme-switcher-side');
+      var readmeButtonSide = utilityLink('README (good for agents)', 'readme-link', 'reference/README_COMPLETE.md');
       var keysButtonSide = utilityButton('', '', toggleShortcutPanel);
-      setButtonFace(keysButtonSide, '⌨', 'Shortcuts');
-      themeButtons.push(themeButtonSide);
+      setButtonLabel(keysButtonSide, 'Shortcuts');
 
       var sidebarUtilities = document.createElement('div');
       sidebarUtilities.className = 'sidebar-utilities';
-      sidebarUtilities.appendChild(themeButtonSide);
+      sidebarUtilities.appendChild(themeSwitcherSide);
+      sidebarUtilities.appendChild(readmeButtonSide);
       sidebarUtilities.appendChild(keysButtonSide);
       sidebar.appendChild(sidebarUtilities);
     }
   }
 
   markCurrentChapter();
-  applyTheme(readStoredTheme() || 'light');
+  applyTheme(readStoredTheme() || 'kr');
   addUtilityButtons();
   updateMenuButtonState();
-  updateThemeButtons(currentTheme());
+  updateThemeSwitchers(currentTheme());
 
   if (menuButton && page) {
     menuButton.addEventListener('click', function () {
